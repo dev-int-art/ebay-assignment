@@ -1,6 +1,7 @@
 import os
 from contextlib import contextmanager
 
+from sqlalchemy import Engine
 from sqlmodel import Session, SQLModel, create_engine
 
 from app.models import (
@@ -33,24 +34,24 @@ class DatabaseError(Exception):
         super().__init__(self.message)
 
 
-async def initialize_database():
+async def initialize_database(use_engine: Engine | None = None):
     """Create the database tables."""
     try:
-        SQLModel.metadata.create_all(engine)
+        SQLModel.metadata.create_all(use_engine or engine)
         print("Database initialized successfully.")
     except Exception as e:
         raise DatabaseError("Failed to initialize database", original_error=e)
 
 
-def drop_database():
+def drop_database(use_engine: Engine | None = None):
     """Drop the database tables."""
-    SQLModel.metadata.drop_all(engine)
+    SQLModel.metadata.drop_all(use_engine or engine)
     print("Database dropped successfully.")
 
 
 @contextmanager
-def get_db_session():
-    session = Session(engine)
+def get_db_session(use_engine: Engine | None = None):
+    session = Session(use_engine or engine)
     try:
         yield session
         session.commit()
