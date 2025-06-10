@@ -14,7 +14,7 @@ class Listing(SQLModel, table=True):
     scan_date: datetime
     is_active: bool = Field(default=True)
     dataset_entity_ids: List[int] = Field(sa_column=Column(ARRAY(Integer)))
-    image_hashes: List[str] = Field(sa_column=Column(ARRAY(Integer)))
+    image_hashes: List[str] = Field(sa_column=Column(ARRAY(String)))
 
     class Config:
         json_encoders = {

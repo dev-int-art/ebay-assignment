@@ -1,6 +1,6 @@
+import os
 from contextlib import contextmanager
 
-from dotenv import dotenv_values
 from sqlmodel import Session, SQLModel, create_engine
 
 from app.models import (
@@ -12,8 +12,7 @@ from app.models import (
     StringPropertyValue,
 )
 
-config = dotenv_values(".env")
-DATABASE_URL = config.get("DATABASE_URL", "")
+DATABASE_URL = os.environ["DATABASE_URL"]
 
 engine = create_engine(
     DATABASE_URL,
@@ -25,10 +24,22 @@ engine = create_engine(
 )
 
 
+class DatabaseError(Exception):
+    """Custom exception for database operations."""
+
+    def __init__(self, message: str, original_error: Exception | None = None):
+        self.message = message
+        self.original_error = original_error
+        super().__init__(self.message)
+
+
 async def initialize_database():
     """Create the database tables."""
-    SQLModel.metadata.create_all(engine)
-    print("Database initialized successfully.")
+    try:
+        SQLModel.metadata.create_all(engine)
+        print("Database initialized successfully.")
+    except Exception as e:
+        raise DatabaseError("Failed to initialize database", original_error=e)
 
 
 def drop_database():
@@ -46,7 +57,7 @@ def get_db_session():
     except Exception as e:
         session.rollback()
         print(f"An error occurred: {e}")
-        raise e
+        # Raise a concealed database error
+        raise DatabaseError("Database operation failed", original_error=e)
     finally:
         session.close()
-        print("Session closed.")

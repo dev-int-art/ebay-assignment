@@ -1,19 +1,22 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 
+from app.api.listings import router as listings_router
 from app.database import initialize_database
 
-app = FastAPI()
 
-
-@app.on_event("startup")
-async def startup_event():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     """Initialize the database on startup."""
-    try:
-        await initialize_database()
-        print("Database initialized successfully.")
-    except Exception as e:
-        print(f"Failed to initialize database: {e}")
-        raise e
+    await initialize_database()
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
+
+# Include routers
+app.include_router(listings_router)
 
 
 @app.get("/")
