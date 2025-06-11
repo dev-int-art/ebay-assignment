@@ -8,10 +8,7 @@ repos:
     hooks:
       - id: trailing-whitespace
         files: "app.*"
-        # exclude: ".*json$|.*txt$|.*csv|.*md"
       - id: check-yaml
-      # - id: no-commit-to-branch
-        # args: ['--branch', 'main']
       - id: check-merge-conflict
       - id: check-ast
       - id: check-json
@@ -25,9 +22,7 @@ repos:
       - id: ruff
         name: "Run ruff import sorter"
         args: ["--select=I", "--fix"]
-
       - id: ruff
         name: "Run ruff linter"
-
       - id: ruff-format
         name: "Run ruff formatter"
