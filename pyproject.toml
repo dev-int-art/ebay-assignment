@@ -1,7 +1,7 @@
 [project]
 name = "ebay-lite"
 version = "0.1.0"
-description = "A lightweight eBay API client using FastAPI + PostgreSQL"
+description = "A lightweight API client using FastAPI + PostgreSQL"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
