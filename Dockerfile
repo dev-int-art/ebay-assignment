@@ -5,7 +5,10 @@ WORKDIR /app
 
 COPY .python-version uv.lock pyproject.toml ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system .
+    uv pip install --system . \
+    && uv sync --dev
+
+ENV PATH="/app/.venv/bin:$PATH"
 
 COPY . .
 

@@ -9,8 +9,10 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: listings_db
+      POSTGRES_MULTIPLE_DATABASES: listings_db,test_listings_db
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./docker-entrypoint-initdb.d:/docker-entrypoint-initdb.d
     networks:
       - listings_net
 
@@ -20,6 +22,7 @@ services:
       - db
     environment:
       DATABASE_URL: postgresql+psycopg://postgres:postgres@db:5432/listings_db
+      TEST_DATABASE_URL: postgresql+psycopg://postgres:postgres@db:5432/test_listings_db
     volumes:
       - .:/app
     ports:

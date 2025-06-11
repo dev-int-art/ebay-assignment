@@ -1,6 +1,8 @@
+import json
 import logging
+from typing import Annotated
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from pydantic import BaseModel, TypeAdapter
 from sqlalchemy import Select, and_, func
 from sqlalchemy.orm import selectinload
@@ -36,7 +38,7 @@ class PropertyValueLike(BaseModel):
 
 
 @router.get("/", response_model=ListingsGetResponse)
-def get_listings(filters: ListingGetRequest = ListingGetRequest()):
+def get_listings(filters: Annotated[ListingGetRequest, Query()]):
     """Get all listings with optional filters."""
     logger.info(f"GET /listings/ - Filters: {filters}")
     PAGE_SIZE = 100
@@ -73,7 +75,7 @@ def get_listings(filters: ListingGetRequest = ListingGetRequest()):
             statement = statement.where(
                 and_(
                     func.cardinality(Listing.dataset_entity_ids) > 0,
-                    DatasetEntity.data.op("@>")(filters.dataset_entities),
+                    DatasetEntity.data.op("@>")(json.loads(filters.dataset_entities)),
                 )
             )
 
@@ -82,10 +84,7 @@ def get_listings(filters: ListingGetRequest = ListingGetRequest()):
 
         statement = _add_filters(statement, filters)
 
-        count_statement = select(func.count(Listing.listing_id.distinct())).select_from(
-            statement.subquery()
-        )
-        total_count = session.exec(count_statement).one()
+        total_count = _get_count(session, filters)
 
         if filters.page:
             statement = statement.offset((filters.page - 1) * PAGE_SIZE)
@@ -101,6 +100,32 @@ def get_listings(filters: ListingGetRequest = ListingGetRequest()):
         )
 
 
+def _get_count(session: Session, filters: ListingGetRequest) -> int:
+    # Create a separate count query without json_agg to avoid duplicates
+    count_statement = (
+        select(func.count(Listing.listing_id.distinct()))
+        .join(DatasetEntity, Listing.dataset_entity_ids.any(DatasetEntity.entity_id))
+        .filter(DatasetEntity.name.is_not(None))
+    )
+
+    if filters.dataset_entities:
+        count_statement = count_statement.where(
+            and_(
+                func.cardinality(Listing.dataset_entity_ids) > 0,
+                DatasetEntity.data.op("@>")(json.loads(filters.dataset_entities)),
+            )
+        )
+
+    property_filters = _get_property_filters(filters.properties, session)
+    count_statement = _add_property_filters(count_statement, property_filters)
+    count_statement = _add_filters(count_statement, filters)
+
+    result = session.exec(count_statement)
+    total_count = result.one() if result is not None else 0
+
+    return total_count
+
+
 def _add_property_filters(statement: Select, property_filters: list) -> Select:
     """Add property filters to the query statement."""
     if property_filters:
@@ -111,13 +136,16 @@ def _add_property_filters(statement: Select, property_filters: list) -> Select:
     return statement
 
 
-def _get_property_filters(properties: dict[int, str], session: Session) -> list[Select]:
+def _get_property_filters(properties: str, session: Session) -> list[Select]:
+    properties = json.loads(properties) if properties else {}
     properties_where_clause = []
 
     if not properties:
         return properties_where_clause
 
     for property_id, expected_value in properties.items():
+        property_id = int(property_id)
+
         property_type = session.exec(
             select(Property.type).where(Property.property_id == property_id)
         ).first()
@@ -184,7 +212,9 @@ def _get_formatted_results(
             properties.append(
                 {
                     "name": property.property.name,
-                    "type": property.property.type,
+                    "type": "str"
+                    if property.property.type == PropertyType.STRING
+                    else "bool",
                     "value": property.value,
                 }
             )
@@ -237,7 +267,8 @@ def upsert_listings(listings_data: UpsertListingsRequest):
 
                 # Update listing with entity IDs
                 listing_obj.dataset_entity_ids = entity_ids
-                return UpsertListingsResponse(status="success", error=None)
+
+            return UpsertListingsResponse(status="success", error=None)
         except Exception as e:
             session.rollback()
             return UpsertListingsResponse(

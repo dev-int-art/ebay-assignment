@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from sqlalchemy import Engine
 from sqlmodel import Session, SQLModel, create_engine
 
-from app.models import (
+from app.models import (  # noqa: F401
     BooleanPropertyValue,
     DatasetEntity,
     Listing,
@@ -14,19 +14,7 @@ from app.models import (
     StringPropertyValue,
 )
 
-# Configure logging
 logger = logging.getLogger(__name__)
-
-DATABASE_URL = os.environ["DATABASE_URL"]
-
-engine = create_engine(
-    DATABASE_URL,
-    echo=True,
-    pool_size=10,
-    max_overflow=20,
-    pool_timeout=30,
-    pool_recycle=1800,
-)
 
 
 class DatabaseError(Exception):
@@ -38,25 +26,47 @@ class DatabaseError(Exception):
         super().__init__(self.message)
 
 
-async def initialize_database(use_engine: Engine | None = None):
+def get_engine() -> Engine:
+    DATABASE_URL = os.environ["DATABASE_URL"]
+
+    if os.environ.get("PYTEST_VERSION"):
+        DATABASE_URL = os.environ.get(
+            "TEST_DATABASE_URL",
+            "postgresql+psycopg://postgres:postgres@localhost:5432/test_listings_db",
+        )
+
+    return create_engine(
+        DATABASE_URL,
+        echo=True,
+        pool_size=10,
+        max_overflow=20,
+        pool_timeout=30,
+        pool_recycle=1800,
+    )
+
+
+async def initialize_database():
     """Create the database tables."""
     try:
-        SQLModel.metadata.create_all(use_engine or engine)
+        engine = get_engine()
+        SQLModel.metadata.create_all(engine)
         logger.info("Database initialized successfully.")
     except Exception as e:
         logger.error(f"Failed to initialize database: {e}")
         raise DatabaseError("Failed to initialize database", original_error=e)
 
 
-async def drop_database(use_engine: Engine | None = None):
+def drop_database():
     """Drop the database tables."""
-    SQLModel.metadata.drop_all(use_engine or engine)
+    engine = get_engine()
+    SQLModel.metadata.drop_all(engine)
     logger.info("Database dropped successfully.")
 
 
 @contextmanager
-def get_db_session(use_engine: Engine | None = None):
-    session = Session(use_engine or engine)
+def get_db_session():
+    engine = get_engine()
+    session = Session(engine)
     try:
         yield session
         session.commit()

@@ -34,5 +34,5 @@ class ListingGetRequest(BaseModel):
     scan_date_to: datetime | None = None
     is_active: bool | None = None
     image_hashes: list[str] | None = None
-    dataset_entities: dict | None = None
-    properties: dict[int, str] | None = None
+    dataset_entities: str | None = None
+    properties: str | None = None
