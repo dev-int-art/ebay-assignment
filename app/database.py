@@ -1,3 +1,4 @@
+import logging
 import os
 from contextlib import contextmanager
 
@@ -12,6 +13,9 @@ from app.models import (
     PropertyType,
     StringPropertyValue,
 )
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 
@@ -38,15 +42,16 @@ async def initialize_database(use_engine: Engine | None = None):
     """Create the database tables."""
     try:
         SQLModel.metadata.create_all(use_engine or engine)
-        print("Database initialized successfully.")
+        logger.info("Database initialized successfully.")
     except Exception as e:
+        logger.error(f"Failed to initialize database: {e}")
         raise DatabaseError("Failed to initialize database", original_error=e)
 
 
-def drop_database(use_engine: Engine | None = None):
+async def drop_database(use_engine: Engine | None = None):
     """Drop the database tables."""
     SQLModel.metadata.drop_all(use_engine or engine)
-    print("Database dropped successfully.")
+    logger.info("Database dropped successfully.")
 
 
 @contextmanager
@@ -57,7 +62,7 @@ def get_db_session(use_engine: Engine | None = None):
         session.commit()
     except Exception as e:
         session.rollback()
-        print(f"An error occurred: {e}")
+        logger.error(f"Database operation failed: {e}")
         # Raise a concealed database error
         raise DatabaseError("Database operation failed", original_error=e)
     finally:
