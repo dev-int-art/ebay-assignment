@@ -160,3 +160,52 @@ def test_get_listings_empty_response():
         data = response.json()
         assert data["total"] == 0
         assert len(data["listings"]) == 0
+
+
+@pytest.mark.integration
+def test_put_listings_endpoint(cleanup_test_database):
+    """Integration test for PUT /listings endpoint."""
+    with TestClient(app) as client:
+        response = client.put(
+            "/listings/",
+            json={
+                "listings": [
+                    {
+                        "listing_id": "112",
+                        "scan_date": "2025-01-05 15:30:50",
+                        "is_active": "true",
+                        "image_hashes": ["hash1", "hash2"],
+                        "properties": [
+                            {"name": "Brand", "type": "str", "value": "Samsung"},
+                            {"name": "Has Delivery", "type": "bool", "value": "false"},
+                        ],
+                        "entities": [
+                            {
+                                "name": "entity_one",
+                                "data": {"key1": "value1", "key2": "value2"},
+                            }
+                        ],
+                    }
+                ]
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "success"
+
+        response = client.get("listings/", params={"listing_id": "112"})
+        data = response.json()
+        listings = data["listings"]
+
+        first_listing = listings[0]
+        assert first_listing["listing_id"] == "112"
+        assert first_listing["is_active"] is True
+        assert "hash1" in first_listing["image_hashes"]
+        assert len(first_listing["properties"]) == 2
+
+        bool_property = next(
+            prop for prop in first_listing["properties"] if prop["type"] == "bool"
+        )
+        assert bool_property["name"] == "Has Delivery"
+        assert bool_property["value"] is False
