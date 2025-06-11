@@ -157,11 +157,11 @@ async def _add_filters(statement: Select, filters: ListingGetRequest):
     if filters.listing_id:
         statement = statement.where(Listing.listing_id == filters.listing_id)
 
-    if filters.scan_date_from and filters.scan_date_to:
-        statement = statement.where(
-            Listing.scan_date >= filters.scan_date_from,
-            Listing.scan_date <= filters.scan_date_to,
-        )
+    if filters.scan_date_from:
+        statement = statement.where(Listing.scan_date >= filters.scan_date_from)
+
+    if filters.scan_date_to:
+        statement = statement.where(Listing.scan_date <= filters.scan_date_to)
 
     if filters.is_active is not None:
         statement = statement.where(Listing.is_active == filters.is_active)
@@ -194,7 +194,9 @@ async def _get_formatted_results(
         formatted_results.append(
             ListingGet(
                 listing_id=listing.listing_id,
-                scan_date=listing.scan_date.isoformat() if listing.scan_date else None,
+                scan_date=listing.scan_date.isoformat(sep=" ")
+                if listing.scan_date
+                else "",
                 is_active=listing.is_active,
                 image_hashes=listing.image_hashes,
                 properties=properties,
