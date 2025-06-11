@@ -36,7 +36,7 @@ class PropertyValueLike(BaseModel):
 
 
 @router.get("/", response_model=ListingsGetResponse)
-async def get_listings(filters: ListingGetRequest = ListingGetRequest()):
+def get_listings(filters: ListingGetRequest = ListingGetRequest()):
     """Get all listings with optional filters."""
     logger.info(f"GET /listings/ - Filters: {filters}")
     PAGE_SIZE = 100
@@ -77,12 +77,12 @@ async def get_listings(filters: ListingGetRequest = ListingGetRequest()):
                 )
             )
 
-        property_filters = await _get_property_filters(filters.properties, session)
-        statement = await _add_property_filters(statement, property_filters)
+        property_filters = _get_property_filters(filters.properties, session)
+        statement = _add_property_filters(statement, property_filters)
 
-        statement = await _add_filters(statement, filters)
+        statement = _add_filters(statement, filters)
 
-        count_statement = select(func.count(Listing.listing_id)).select_from(
+        count_statement = select(func.count(Listing.listing_id.distinct())).select_from(
             statement.subquery()
         )
         total_count = session.exec(count_statement).one()
@@ -93,7 +93,7 @@ async def get_listings(filters: ListingGetRequest = ListingGetRequest()):
         statement = statement.order_by(Listing.listing_id).limit(PAGE_SIZE)
         results = session.exec(statement).all()
 
-        formatted_results = await _get_formatted_results(results)
+        formatted_results = _get_formatted_results(results)
 
         return ListingsGetResponse(
             listings=formatted_results,
@@ -101,7 +101,7 @@ async def get_listings(filters: ListingGetRequest = ListingGetRequest()):
         )
 
 
-async def _add_property_filters(statement: Select, property_filters: list) -> Select:
+def _add_property_filters(statement: Select, property_filters: list) -> Select:
     """Add property filters to the query statement."""
     if property_filters:
         combined_filter = property_filters[0]
@@ -111,9 +111,7 @@ async def _add_property_filters(statement: Select, property_filters: list) -> Se
     return statement
 
 
-async def _get_property_filters(
-    properties: dict[int, str], session: Session
-) -> list[Select]:
+def _get_property_filters(properties: dict[int, str], session: Session) -> list[Select]:
     properties_where_clause = []
 
     if not properties:
@@ -152,7 +150,7 @@ async def _get_property_filters(
     return properties_where_clause
 
 
-async def _add_filters(statement: Select, filters: ListingGetRequest):
+def _add_filters(statement: Select, filters: ListingGetRequest):
     """Add filters to the query statement."""
     if filters.listing_id:
         statement = statement.where(Listing.listing_id == filters.listing_id)
@@ -172,7 +170,7 @@ async def _add_filters(statement: Select, filters: ListingGetRequest):
     return statement
 
 
-async def _get_formatted_results(
+def _get_formatted_results(
     results: list[tuple[Listing, list[dict]]],
 ) -> list[ListingGet]:
     formatted_results = []
@@ -208,7 +206,7 @@ async def _get_formatted_results(
 
 
 @router.put("/", response_model=UpsertListingsResponse)
-async def upsert_listings(listings_data: UpsertListingsRequest):
+def upsert_listings(listings_data: UpsertListingsRequest):
     """
     Insert or update multiple listings with their properties and entities.
     `UpsertListingsRequest` is the source of truth.
@@ -223,17 +221,15 @@ async def upsert_listings(listings_data: UpsertListingsRequest):
             for index, listing_data in enumerate(listings):
                 current_listing_index = listing_data.listing_id
 
-                listing_obj = await _upsert_listing(listing_data, session)
+                listing_obj = _upsert_listing(listing_data, session)
 
-                # Handle Properties
-                await _upsert_properties(
+                _upsert_properties(
                     properties=listing_data.properties,
                     session=session,
                     listing_id=listing_data.listing_id,
                 )
 
-                # Handle Entities
-                entity_ids = await _upsert_entities(
+                entity_ids = _upsert_entities(
                     entities=listing_data.entities,
                     session=session,
                     listing_id=listing_data.listing_id,
@@ -250,7 +246,7 @@ async def upsert_listings(listings_data: UpsertListingsRequest):
             )
 
 
-async def _upsert_listing(listing_data: UpsertListing, session: Session) -> Listing:
+def _upsert_listing(listing_data: UpsertListing, session: Session) -> Listing:
     existing_listing = session.exec(
         select(Listing).where(Listing.listing_id == listing_data.listing_id)
     ).first()
@@ -279,9 +275,7 @@ async def _upsert_listing(listing_data: UpsertListing, session: Session) -> List
     return listing_obj
 
 
-async def _upsert_properties(
-    properties: list[Property], session: Session, listing_id: str
-):
+def _upsert_properties(properties: list[Property], session: Session, listing_id: str):
     """Upsert properties for a listing."""
     property_table_map = {
         "str": StringPropertyValue,
@@ -337,7 +331,7 @@ async def _upsert_properties(
             session.add(property_value)
 
 
-async def _upsert_entities(
+def _upsert_entities(
     entities: list[Entity], session: Session, listing_id: str
 ) -> list[int]:
     entity_ids = []
