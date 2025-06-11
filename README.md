@@ -32,6 +32,44 @@ A FastAPI-based application that provides endpoints to upsert and read listings 
 3. **Access the API**
    - Interactive API documentation: `http://localhost:8000/docs`
    - The Listings API will be available at `http://localhost:8000/listings`
+   - You can setup a [Bruno](https://www.usebruno.com/) collection from the bruno files in the repo
+   - Alternatively you can run:
+      ```
+      curl --request PUT \
+      --url http://0.0.0.0:8000/listings \
+      --header 'content-type: application/json' \
+      --data '{
+      "listings": [
+         {
+            "listing_id": "1111224",
+            "scan_date": "2025-01-05 15:30:50",
+            "is_active": true,
+            "image_hashes": [
+            "4e32d4",
+            "a54t459"
+            ],
+            "properties": [
+            {
+               "name": "Unit of Measure",
+               "type": "str",
+               "value": "Kg"
+            },
+            {
+               "name": "Has Delivery",
+               "type": "bool",
+               "value": "false"
+            }
+            ],
+            "entities": [
+            {
+               "name": "Quality Checks", 
+               "data": {"pc10": 0.23, "pc5": 0.45}
+            }
+            ]
+         }
+      ]
+      }'
+      ```
 
 > [!NOTE]
 > There's no seed data. You might want to run the Upsert API first
