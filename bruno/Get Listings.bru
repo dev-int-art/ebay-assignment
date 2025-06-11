@@ -1,0 +1,15 @@
+meta {
+  name: Get Listings
+  type: http
+  seq: 2
+}
+
+get {
+  url: http://0.0.0.0:8000/listings
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {"filters": {"image_hashes": ["4e32d4"]}}
+}
