@@ -20,8 +20,8 @@ A FastAPI-based application that provides endpoints to upsert and read listings 
 
 1. **Clone this project**
    ```bash
-   git clone <repository-url>
-   cd <project-directory>
+   git clone https://github.com/dev-int-art/listings-api.git
+   cd listings-api
    ```
 
 2. **Start the application**
@@ -30,8 +30,11 @@ A FastAPI-based application that provides endpoints to upsert and read listings 
    ```
 
 3. **Access the API**
-   - The Listings API will be available at `http://localhost:8000/listings`
    - Interactive API documentation: `http://localhost:8000/docs`
+   - The Listings API will be available at `http://localhost:8000/listings`
+
+> [!NOTE]
+> There's no seed data. You might want to run the Upsert API first
 
 ## API Documentation
 
@@ -76,11 +79,11 @@ The application uses:
 - **PostgreSQL**: Database with JSONB support
 - **Pytest**: Testing framework
 
-
 <hr>
+
 ## Considerations and Trade Offs
 
-- Using Postgres instead of SQLite due to native support for complex columns
+- Using Postgres instead of SQLite due to native support for complex columns.
 - `upsert_listings` is atomic. A different endpoint or an additonal param could give us partial failure support too.
 
 ## Doubts
