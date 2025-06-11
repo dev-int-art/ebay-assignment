@@ -1,7 +1,9 @@
+import logging
+
 from fastapi import APIRouter
 from pydantic import BaseModel, TypeAdapter
-from sqlalchemy import Select, String, Text, case, cast, func, literal_column, union
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy import Select, and_, func
+from sqlalchemy.orm import selectinload
 from sqlmodel import Session, select
 
 from app.api.utils import is_bool_like
@@ -20,7 +22,9 @@ from app.schemas.request import (
     UpsertListing,
     UpsertListingsRequest,
 )
-from app.schemas.response import UpsertListingsResponse
+from app.schemas.response import ListingGet, ListingsGetResponse, UpsertListingsResponse
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/listings", tags=["listings"])
 
@@ -31,189 +35,121 @@ class PropertyValueLike(BaseModel):
     value: str
 
 
-@router.get("/test", response_model=list[dict])
-async def test():
-    with get_db_session() as session:
-        results = session.exec(
-            select(Property.property_id, Property.name, Property.type)
-        ).all()
-        return [
-            {
-                "property_id": result.property_id,
-                "name": result.name,
-                "type": result.type,
-            }
-            for result in results
-        ]
-
-
-@router.get("/", response_model=list[dict])
+@router.get("/", response_model=ListingsGetResponse)
 async def get_listings(filters: ListingGetRequest = ListingGetRequest()):
     """Get all listings with optional filters."""
+    logger.info(f"GET /listings/ - Filters: {filters}")
     PAGE_SIZE = 100
 
     with get_db_session() as session:
-        # Create union of property values for aggregation
-        string_props = select(
-            StringPropertyValue.listing_id,
-            StringPropertyValue.property_id,
-            StringPropertyValue.value.label("value"),
-            literal_column("'str'").label("type"),
-        )
-
-        bool_props = select(
-            BooleanPropertyValue.listing_id,
-            BooleanPropertyValue.property_id,
-            BooleanPropertyValue.value.cast(String).label("value"),
-            literal_column("'bool'").label("type"),
-        )
-
-        property_values_union = union(string_props, bool_props).subquery()
-
-        # Subquery for aggregated properties
-        properties_statement = (
+        statement = (
             select(
-                property_values_union.c.listing_id,
-                func.json_agg(
-                    func.json_build_object(
-                        "name",
-                        Property.name,
-                        "type",
-                        property_values_union.c.type,
-                        "value",
-                        property_values_union.c.value,
-                    )
-                )
-                .filter(Property.name.is_not(None))
-                .label("properties"),
+                Listing,
+                func.coalesce(
+                    func.json_agg(
+                        func.json_build_object(
+                            "name", DatasetEntity.name, "data", DatasetEntity.data
+                        )
+                    ),
+                    func.json_build_array(),
+                ).label("entities"),
             )
-            .join(Property, Property.property_id == property_values_union.c.property_id)
-            .group_by(property_values_union.c.listing_id)
-        )
-
-        properties_subquery = (properties_statement).subquery()
-
-        # Subquery for aggregated entities
-        entities_statement = (
-            select(
-                Listing.listing_id,
-                func.json_agg(
-                    func.json_build_object(
-                        "name", DatasetEntity.name, "data", DatasetEntity.data
-                    )
-                )
-                .filter(DatasetEntity.name.is_not(None))
-                .label("entities"),
+            .options(
+                selectinload(Listing.string_property_values).selectinload(
+                    StringPropertyValue.property
+                ),
+                selectinload(Listing.boolean_property_values).selectinload(
+                    BooleanPropertyValue.property
+                ),
             )
             .join(
                 DatasetEntity, Listing.dataset_entity_ids.any(DatasetEntity.entity_id)
             )
+            .filter(DatasetEntity.name.is_not(None))
             .group_by(Listing.listing_id)
         )
-        if filters.dataset_entities:
-            # Filter by dataset entities with matching JSON data
-            entities_statement = entities_statement.where(
-                DatasetEntity.data.op("@>")(filters.dataset_entities)
-            )
 
-        entities_subquery = (entities_statement).subquery()
-
-        # Main query with subqueries
-        statement = (
-            select(
-                Listing.listing_id,
-                Listing.scan_date,
-                Listing.is_active,
-                Listing.dataset_entity_ids,
-                Listing.image_hashes,
-                func.coalesce(
-                    properties_subquery.c.properties, func.json_build_array()
-                ).label("properties"),
-                func.coalesce(
-                    entities_subquery.c.entities, func.json_build_array()
-                ).label("entities"),
-            )
-            .join(
-                properties_subquery,
-                properties_subquery.c.listing_id == Listing.listing_id,
-                isouter=True,
-            )
-            .join(
-                entities_subquery,
-                entities_subquery.c.listing_id == Listing.listing_id,
-                isouter=True,
-            )
-        )
         if filters.dataset_entities:
             statement = statement.where(
-                func.cardinality(Listing.dataset_entity_ids) > 0
+                and_(
+                    func.cardinality(Listing.dataset_entity_ids) > 0,
+                    DatasetEntity.data.op("@>")(filters.dataset_entities),
+                )
             )
 
-        # Filter listings by properties
-        if filters.properties:
-            # Create conditions for each property filter
-            property_condition = None
-            for property_id, expected_value in filters.properties.items():
-                bool_value = (
-                    str(TypeAdapter(bool).validate_python(expected_value)).lower()
-                    if is_bool_like(expected_value)
-                    else expected_value
-                )
-                # Use EXISTS subquery to check if listing has the specified property value
-                # property_values_union already has property_id and type information
-                property_exists = (
-                    select(1)
-                    .select_from(property_values_union)
-                    .where(
-                        (property_values_union.c.listing_id == Listing.listing_id)
-                        & (property_values_union.c.property_id == int(property_id))
-                        & case(
-                            (
-                                property_values_union.c.type == "bool",
-                                property_values_union.c.value == bool_value,
-                            ),
-                            (
-                                property_values_union.c.type == "str",
-                                property_values_union.c.value == expected_value,
-                            ),
-                            else_=False,
-                        )
-                    )
-                ).exists()
+        property_filters = await _get_property_filters(filters.properties, session)
+        statement = await _add_property_filters(statement, property_filters)
 
-                property_condition = (
-                    property_exists
-                    if property_condition is None
-                    else (property_condition & property_exists)
-                )
-
-            statement = statement.where(property_condition)
-
-        # Apply filters
         statement = await _add_filters(statement, filters)
+
+        count_statement = select(func.count(Listing.listing_id)).select_from(
+            statement.subquery()
+        )
+        total_count = session.exec(count_statement).one()
 
         if filters.page:
             statement = statement.offset((filters.page - 1) * PAGE_SIZE)
 
         statement = statement.order_by(Listing.listing_id).limit(PAGE_SIZE)
-
         results = session.exec(statement).all()
 
-        # Convert results to the desired structure
-        formatted_results = []
-        for result in results:
-            formatted_result = {
-                "listing_id": result.listing_id,
-                "scan_date": result.scan_date.isoformat() if result.scan_date else None,
-                "is_active": result.is_active,
-                "dataset_entity_ids": result.dataset_entity_ids,
-                "image_hashes": result.image_hashes,
-                "properties": result.properties if result.properties != [None] else [],
-                "entities": result.entities if result.entities != [None] else [],
-            }
-            formatted_results.append(formatted_result)
+        formatted_results = await _get_formatted_results(results)
 
-        return formatted_results
+        return ListingsGetResponse(
+            listings=formatted_results,
+            total=total_count,
+        )
+
+
+async def _add_property_filters(statement: Select, property_filters: list) -> Select:
+    """Add property filters to the query statement."""
+    if property_filters:
+        combined_filter = property_filters[0]
+        for filter_condition in property_filters[1:]:
+            combined_filter = combined_filter & filter_condition
+        statement = statement.where(combined_filter)
+    return statement
+
+
+async def _get_property_filters(
+    properties: dict[int, str], session: Session
+) -> list[Select]:
+    properties_where_clause = []
+
+    if not properties:
+        return properties_where_clause
+
+    for property_id, expected_value in properties.items():
+        property_type = session.exec(
+            select(Property.type).where(Property.property_id == property_id)
+        ).first()
+
+        # TODO: Create a map that stores "string": {table: StringPropertyValue, formatter: lambda} (for scope creep)
+        if property_type == PropertyType.BOOLEAN:
+            bool_value = (
+                TypeAdapter(bool).validate_python(expected_value)
+                if is_bool_like(expected_value)
+                else expected_value
+            )
+            subquery = (
+                select(1).where(
+                    BooleanPropertyValue.property_id == property_id,
+                    BooleanPropertyValue.value == bool_value,
+                    BooleanPropertyValue.listing_id == Listing.listing_id,
+                )
+            ).exists()
+            properties_where_clause.append(subquery)
+        elif property_type == PropertyType.STRING:
+            subquery = (
+                select(1).where(
+                    StringPropertyValue.property_id == property_id,
+                    StringPropertyValue.value == expected_value,
+                    StringPropertyValue.listing_id == Listing.listing_id,
+                )
+            ).exists()
+            properties_where_clause.append(subquery)
+
+    return properties_where_clause
 
 
 async def _add_filters(statement: Select, filters: ListingGetRequest):
@@ -231,11 +167,42 @@ async def _add_filters(statement: Select, filters: ListingGetRequest):
         statement = statement.where(Listing.is_active == filters.is_active)
 
     if filters.image_hashes:
-        statement = statement.where(
-            Listing.image_hashes.overlap(cast(filters.image_hashes, ARRAY(Text)))
-        )
+        statement = statement.where(Listing.image_hashes.op("&&")(filters.image_hashes))
 
     return statement
+
+
+async def _get_formatted_results(
+    results: list[tuple[Listing, list[dict]]],
+) -> list[ListingGet]:
+    formatted_results = []
+    for result in results:
+        listing, entities = result
+        str_properties = listing.string_property_values
+        bool_properties = listing.boolean_property_values
+
+        properties = []
+        for property in str_properties + bool_properties:
+            properties.append(
+                {
+                    "name": property.property.name,
+                    "type": property.property.type,
+                    "value": property.value,
+                }
+            )
+
+        formatted_results.append(
+            ListingGet(
+                listing_id=listing.listing_id,
+                scan_date=listing.scan_date.isoformat() if listing.scan_date else None,
+                is_active=listing.is_active,
+                image_hashes=listing.image_hashes,
+                properties=properties,
+                entities=entities,
+            )
+        )
+
+    return formatted_results
 
 
 @router.put("/", response_model=UpsertListingsResponse)
@@ -244,6 +211,8 @@ async def upsert_listings(listings_data: UpsertListingsRequest):
     Insert or update multiple listings with their properties and entities.
     `UpsertListingsRequest` is the source of truth.
     """
+    logger.info(f"PUT /listings/ - Upserting {len(listings_data.listings)} listings")
+
     with get_db_session() as session:
         listings = listings_data.listings
         current_listing_index = ""
