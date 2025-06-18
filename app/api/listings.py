@@ -1,5 +1,6 @@
 import json
 import logging
+from collections import defaultdict
 from typing import Annotated
 
 from fastapi import APIRouter, Query
@@ -79,8 +80,15 @@ def get_listings(filters: Annotated[ListingGetRequest, Query()]):
                 )
             )
 
-        property_filters = _get_property_filters(filters.properties, session)
-        statement = _add_property_filters(statement, property_filters)
+        has_property_filters, listing_ids = _get_property_filtered_ids(
+            filters.properties, session, filters.listing_id
+        )
+        if has_property_filters:
+            # If property filters found no match, return empty response
+            if not listing_ids:
+                return ListingsGetResponse(listings=[], total=0)
+
+            statement = statement.where(Listing.listing_id.in_(listing_ids))
 
         statement = _add_filters(statement, filters)
 
@@ -116,8 +124,13 @@ def _get_count(session: Session, filters: ListingGetRequest) -> int:
             )
         )
 
-    property_filters = _get_property_filters(filters.properties, session)
-    count_statement = _add_property_filters(count_statement, property_filters)
+    has_property_filters, listing_ids = _get_property_filtered_ids(
+        filters.properties, session
+    )
+    if has_property_filters:
+        # The no-match case should ideally not reach here
+        count_statement = count_statement.where(Listing.listing_id.in_(listing_ids))
+
     count_statement = _add_filters(count_statement, filters)
 
     result = session.exec(count_statement)
@@ -136,46 +149,89 @@ def _add_property_filters(statement: Select, property_filters: list) -> Select:
     return statement
 
 
-def _get_property_filters(properties: str, session: Session) -> list[Select]:
+def _get_property_filtered_ids(
+    properties: str, session: Session, listing_id_filter: str | None = None
+) -> tuple[bool, list[str]]:
+    """
+    Returns a tuple of (has_property_filters, listing_ids)
+    """
+
+    def _get_property_type(property_id: int) -> str:
+        return session.exec(
+            select(Property.type).where(Property.property_id == property_id)
+        ).one()
+
     properties = json.loads(properties) if properties else {}
-    properties_where_clause = []
 
     if not properties:
-        return properties_where_clause
+        return False, []
 
+    # Create a {"string": [...], "boolean": [...]} map
+    type_filter_map = defaultdict(list)
     for property_id, expected_value in properties.items():
         property_id = int(property_id)
+        property_type = _get_property_type(property_id)
+        type_filter_map[property_type].append(
+            {
+                "property_id": property_id,
+                "value": expected_value,
+            }
+        )
 
-        property_type = session.exec(
-            select(Property.type).where(Property.property_id == property_id)
-        ).first()
-
-        # TODO: Create a map that stores "string": {table: StringPropertyValue, formatter: lambda} (for scope creep)
-        if property_type == PropertyType.BOOLEAN:
-            bool_value = (
-                TypeAdapter(bool).validate_python(expected_value)
-                if is_bool_like(expected_value)
-                else expected_value
+    listing_ids = []
+    for property_type, filters in type_filter_map.items():
+        listing_ids.extend(
+            _get_listing_ids_for_property_type(
+                property_type, filters, session, listing_id_filter
             )
-            subquery = (
-                select(1).where(
-                    BooleanPropertyValue.property_id == property_id,
-                    BooleanPropertyValue.value == bool_value,
-                    BooleanPropertyValue.listing_id == Listing.listing_id,
-                )
-            ).exists()
-            properties_where_clause.append(subquery)
-        elif property_type == PropertyType.STRING:
-            subquery = (
-                select(1).where(
-                    StringPropertyValue.property_id == property_id,
-                    StringPropertyValue.value == expected_value,
-                    StringPropertyValue.listing_id == Listing.listing_id,
-                )
-            ).exists()
-            properties_where_clause.append(subquery)
+        )
 
-    return properties_where_clause
+    return True, listing_ids
+
+
+def _get_listing_ids_for_property_type(
+    property_type: str,
+    filters: list[dict],
+    session: Session,
+    listing_id_filter: str | None = None,
+) -> list[str]:
+    if property_type == PropertyType.BOOLEAN:
+        prop_filter_query = select(BooleanPropertyValue.listing_id)
+        for filter in filters:
+            bool_value = (
+                TypeAdapter(bool).validate_python(filter["value"])
+                if is_bool_like(filter["value"])
+                else filter["value"]
+            )
+            prop_filter_query = prop_filter_query.where(
+                BooleanPropertyValue.property_id == filter["property_id"],
+                BooleanPropertyValue.value == bool_value,
+            )
+
+        if listing_id_filter:
+            prop_filter_query = prop_filter_query.where(
+                BooleanPropertyValue.listing_id == listing_id_filter
+            )
+
+        prop_filter_query = prop_filter_query.group_by(BooleanPropertyValue.listing_id)
+        return session.exec(prop_filter_query).all()
+    elif property_type == PropertyType.STRING:
+        prop_filter_query = select(StringPropertyValue.listing_id)
+        for filter in filters:
+            prop_filter_query = prop_filter_query.where(
+                StringPropertyValue.property_id == filter["property_id"],
+                StringPropertyValue.value == filter["value"],
+            )
+
+        if listing_id_filter:
+            prop_filter_query = prop_filter_query.where(
+                StringPropertyValue.listing_id == listing_id_filter
+            )
+
+        prop_filter_query = prop_filter_query.group_by(StringPropertyValue.listing_id)
+        return session.exec(prop_filter_query).all()
+    else:
+        raise ValueError(f"Invalid property type: {property_type}")
 
 
 def _add_filters(statement: Select, filters: ListingGetRequest):
