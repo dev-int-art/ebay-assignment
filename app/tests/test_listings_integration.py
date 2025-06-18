@@ -42,7 +42,7 @@ def test_get_listings_endpoint(create_sample_listings, cleanup_test_database):
 def test_get_listings_with_listing_id(create_sample_listings, cleanup_test_database):
     """Integration test for GET /listings endpoint."""
     with TestClient(app) as client:
-        response = client.get("listings/", params={"listing_id": "112"})
+        response = client.get("listings/?listing_id=112")
 
         assert response.status_code == 200
 
@@ -62,8 +62,7 @@ def test_get_listings_with_from_to_dates(create_sample_listings, cleanup_test_da
     """Integration test for GET /listings endpoint."""
     with TestClient(app) as client:
         response = client.get(
-            "listings/",
-            params={"scan_date_from": "2020-06-10", "scan_date_to": "2025-01-01"},
+            "listings/?scan_date_from=2020-06-10&scan_date_to=2025-01-01"
         )
 
         assert response.status_code == 200
@@ -79,7 +78,7 @@ def test_get_listings_with_from_to_dates(create_sample_listings, cleanup_test_da
 def test_get_listings_with_from_date(create_sample_listings, cleanup_test_database):
     """Integration test for GET /listings endpoint."""
     with TestClient(app) as client:
-        response = client.get("listings/", params={"scan_date_from": "2020-06-10"})
+        response = client.get("listings/?scan_date_from=2020-06-10")
 
         assert response.status_code == 200
 
@@ -94,7 +93,7 @@ def test_get_listings_with_from_date(create_sample_listings, cleanup_test_databa
 def test_get_listings_with_image_hashes(create_sample_listings, cleanup_test_database):
     """Integration test for GET /listings endpoint."""
     with TestClient(app) as client:
-        response = client.get("listings/", params={"image_hashes": ["hash1", "hash2"]})
+        response = client.get("listings/?image_hashes=hash1&image_hashes=hash2")
 
         assert response.status_code == 200
 
@@ -194,7 +193,7 @@ def test_put_listings_endpoint(cleanup_test_database):
         data = response.json()
         assert data["status"] == "success"
 
-        response = client.get("listings/", params={"listing_id": "112"})
+        response = client.get("listings/?listing_id=112")
         data = response.json()
         listings = data["listings"]
 
